@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Real Camera Size Scanner</title>
+
+    <!-- TensorFlow.js & COCO-SSD Model -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0d1117;
+            color: #e6edf3;
+            font-family: -apple-system, 'Noto Sans Thai', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .header {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #58a6ff;
+            font-size: 1.8rem;
+        }
+
+        .header p {
+            color: #8b949e;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .video-wrapper {
+            position: relative;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            overflow: hidden;
+            width: 640px;
+            height: 480px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+        }
+
+        .panel {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 20px;
+            width: 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .panel h2 {
+            font-size: 1.2rem;
+            color: #3fb950;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 10px;
+        }
+
+        label {
+            font-size: 0.85rem;
+            color: #8b949e;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: #58a6ff;
+        }
+
+        .val-display {
+            color: #58a6ff;
+            font-weight: bold;
+            float: right;
+        }
+
+        .btn {
+            background: #238636;
+            color: #ffffff;
+            border: none;
+            padding: 10px;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+            text-align: center;
+        }
+
+        .btn:hover {
+            background: #2ea043;
+        }
+
+        .btn:disabled {
+            background: #21262d;
+            color: #8b949e;
+            cursor: not-allowed;
+        }
+
+        .status {
+            font-size: 0.85rem;
+            padding: 10px;
+            border-radius: 6px;
+            background: #21262d;
+            text-align: center;
+            color: #fbbf24;
+        }
+
+        .detected-list {
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 0.8rem;
+        }
+
+        .det-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #30363d;
+        }
+
+        .det-name {
+            color: #f0883e;
+            text-transform: capitalize;
+        }
+
+        .det-size {
+            color: #58a6ff;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+        <h1>AI Real Camera Size Scanner</h1>
+        <p>ระบบสแกนและวัดขนาดวัตถุผ่านกล้องเว็บแคม (ใช้ AI COCO-SSD)</p>
+    </div>
+
+    <div class="container">
+        <div class="video-wrapper">
+            <video id="webcam" autoplay playsinline muted></video>
+            <canvas id="canvas"></canvas>
+        </div>
+
+        <div class="panel">
+            <h2>ตั้งค่าสแกน (Settings)</h2>
+
+            <div id="status" class="status">กำลังโหลดโมเดล AI...</div>
+
+            <button id="cameraBtn" class="btn" disabled>เปิดกล้อง (Start Camera)</button>
+
+            <div>
+                <label>
+                    Calibration (Px ต่อ เซนติเมตร)<br>
+                    <small style="color:#8b949e;">ปรับเทียบขนาดจริงกับพิกเซล</small>
+                    <span class="val-display" id="calibVal">30</span>
+                </label>
+                <input type="range" id="calibration" min="10" max="100" value="30">
+            </div>
+
+            <h2>ตรวจพบ (Detected)</h2>
+            <div class="detected-list" id="detectedList">
+                <!-- รายการวัตถุจะถูกเพิ่มที่นี่ -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const cameraBtn = document.getElementById('cameraBtn');
+        const statusDiv = document.getElementById('status');
+        const calibrationRange = document.getElementById('calibration');
+        const calibValDisplay = document.getElementById('calibVal');
+        const detectedList = document.getElementById('detectedList');
+
+        let model = null;
+        let isDetecting = false;
+        let pixelsPerCm = parseInt(calibrationRange.value);
+
+        // อัปเดตค่า Calibration
+        calibrationRange.addEventListener('input', (e) => {
+            pixelsPerCm = parseInt(e.target.value);
+            calibValDisplay.textContent = pixelsPerCm;
+        });
+
+        // โหลดโมเดล COCO-SSD
+        async function loadModel() {
+            try {
+                model = await cocoSsd.load();
+                statusDiv.textContent = 'โมเดลพร้อมใช้งานแล้ว!';
+                statusDiv.style.color = '#3fb950';
+                cameraBtn.disabled = false;
+            } catch (err) {
+                statusDiv.textContent = 'เกิดข้อผิดพลาดในการโหลดโมเดล';
+                statusDiv.style.color = '#f87171';
+                console.error(err);
+            }
+        }
+
+        // เปิดกล้องและเริ่มการตรวจจับ
+        cameraBtn.addEventListener('click', async () => {
+            if (!isDetecting) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: 640, height: 480, facingMode: 'environment' }
+                    });
+                    video.srcObject = stream;
+
+                    video.onloadeddata = () => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        isDetecting = true;
+                        cameraBtn.textContent = 'ปิดกล้อง (Stop Camera)';
+                        cameraBtn.style.background = '#f87171';
+                        statusDiv.textContent = 'กำลังสแกน...';
+                        detectFrame();
+                    };
+                } catch (err) {
+                    alert('ไม่สามารถเปิดกล้องได้: ' + err.message);
+                }
+            } else {
+                const stream = video.srcObject;
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                video.srcObject = null;
+                isDetecting = false;
+                cameraBtn.textContent = 'เปิดกล้อง (Start Camera)';
+                cameraBtn.style.background = '#238636';
+                statusDiv.textContent = 'กล้องถูกปิดแล้ว';
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                detectedList.innerHTML = '';
+            }
+        });
+
+        // ตรวจจับภาพทีละเฟรม
+        async function detectFrame() {
+            if (!isDetecting) return;
+
+            const predictions = await model.detect(video);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            detectedList.innerHTML = '';
+
+            predictions.forEach(prediction => {
+                // [x, y, width, height]
+                const [x, y, w, h] = prediction.bbox;
+                const text = `${prediction.class} (${Math.round(prediction.score * 100)}%)`;
+
+                // คำนวณขนาดเป็นเซนติเมตร
+                const cmWidth = (w / pixelsPerCm).toFixed(1);
+                const cmHeight = (h / pixelsPerCm).toFixed(1);
+
+                // ตีกรอบ
+                ctx.strokeStyle = '#58a6ff';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x, y, w, h);
+
+                // พื้นหลังข้อความ
+                ctx.fillStyle = '#58a6ff';
+                ctx.fillRect(x, y > 20 ? y - 20 : 0, ctx.measureText(text).width + 80, 20);
+
+                // วาดข้อความ (ชื่อวัตถุ + ขนาดซม.)
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '14px Arial';
+                ctx.fillText(`${text} | ${cmWidth}x${cmHeight}cm`, x + 5, y > 20 ? y - 5 : 15);
+
+                // อัปเดตรายการด้านขวา
+                const div = document.createElement('div');
+                div.className = 'det-item';
+                div.innerHTML = `<span class="det-name">${prediction.class}</span> <span class="det-size">${cmWidth} x ${cmHeight} cm</span>`;
+                detectedList.appendChild(div);
+            });
+
+            requestAnimationFrame(detectFrame);
+        }
+
+        // โหลดโมเดลเมื่อเริ่มหน้าเว็บ
+        loadModel();
+    </script>
+</body>
+
+</html>

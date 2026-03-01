@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Box Sorting — สองแคว Workshop</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.11.3/lib/p5.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: -apple-system, 'Noto Sans Thai', sans-serif;
+      overflow-x: hidden;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr 300px;
+      gap: 12px;
+      padding: 12px;
+      height: 100vh;
+    }
+
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+    }
+
+    .panel {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 16px;
+      overflow-y: auto;
+    }
+
+    .panel h2 {
+      color: #58a6ff;
+      font-size: 1rem;
+      margin-bottom: 8px;
+    }
+
+    .panel h3 {
+      color: #8b949e;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin: 12px 0 6px;
+    }
+
+    label.ctrl {
+      display: block;
+      font-size: 0.75rem;
+      color: #8b949e;
+      margin: 8px 0 2px;
+    }
+
+    input[type="text"],
+    input[type="range"] {
+      width: 100%;
+    }
+
+    input[type="text"] {
+      padding: 8px 10px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      font-size: 0.85rem;
+    }
+
+    input[type="range"] {
+      accent-color: #58a6ff;
+    }
+
+    .val {
+      float: right;
+      color: #58a6ff;
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
+
+    .preset-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin: 8px 0;
+    }
+
+    .preset-btn {
+      padding: 8px 4px;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      background: #21262d;
+      color: #8b949e;
+      font-size: 0.7rem;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s;
+    }
+
+    .preset-btn:hover {
+      border-color: #58a6ff;
+    }
+
+    .preset-btn.active {
+      background: #1f3a5f;
+      border-color: #58a6ff;
+      color: #58a6ff;
+    }
+
+    .start-btn {
+      width: 100%;
+      padding: 10px;
+      margin-top: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .start-btn.off {
+      background: #3fb950;
+      color: #0d1117;
+    }
+
+    .start-btn.on {
+      background: #f87171;
+      color: #0d1117;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 4px 0;
+      font-size: 0.75rem;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot.on {
+      background: #3fb950;
+      box-shadow: 0 0 4px #3fb950;
+    }
+
+    .dot.off {
+      background: #f87171;
+    }
+
+    .dot.wait {
+      background: #f0883e;
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      50% {
+        opacity: 0.4;
+      }
+    }
+
+    .viz-wrap {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 12px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 8px 0;
+    }
+
+    .viz-wrap canvas {
+      display: block;
+    }
+
+    .chart-wrap {
+      position: relative;
+      height: 180px;
+      margin-bottom: 12px;
+    }
+
+    .feed {
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 0.7rem;
+      font-family: monospace;
+    }
+
+    .feed-entry {
+      padding: 3px 6px;
+      border-bottom: 1px solid #21262d;
+      display: flex;
+      gap: 8px;
+    }
+
+    .feed-entry .ts {
+      color: #484f58;
+      flex-shrink: 0;
+    }
+
+    .feed-entry .val-col {
+      min-width: 40px;
+    }
+
+    .feed-entry .info {
+      color: #8b949e;
+    }
+
+    .feed-entry.small .val-col {
+      color: #58a6ff;
+    }
+
+    .feed-entry.medium .val-col {
+      color: #fbbf24;
+    }
+
+    .feed-entry.large .val-col {
+      color: #f0883e;
+    }
+
+    .feed-entry.miss .val-col {
+      color: #f87171;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin: 8px 0;
+    }
+
+    .stat-card {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+
+    .stat-card .num {
+      font-size: 1.4rem;
+      font-weight: 700;
+    }
+
+    .stat-card .lbl {
+      font-size: 0.65rem;
+      color: #8b949e;
+      margin-top: 2px;
+    }
+
+    .stat-card.green .num {
+      color: #3fb950;
+    }
+
+    .stat-card.red .num {
+      color: #f87171;
+    }
+
+    .stat-card.yellow .num {
+      color: #fbbf24;
+    }
+
+    .stat-card.blue .num {
+      color: #58a6ff;
+    }
+
+    .stat-card.orange .num {
+      color: #f0883e;
+    }
+
+    .header {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+    }
+
+    .header h1 {
+      font-size: 1.2rem;
+      background: linear-gradient(135deg, #58a6ff, #3fb950);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header .sub {
+      color: #8b949e;
+      font-size: 0.75rem;
+    }
+
+    .header .links {
+      margin-left: auto;
+      font-size: 0.7rem;
+    }
+
+    .header .links a {
+      color: #58a6ff;
+      text-decoration: none;
+      margin-left: 12px;
+    }
+
+    .size-bins {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+      margin: 8px 0;
+    }
+
+    .size-bin {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 8px;
+      text-align: center;
+    }
+
+    .size-bin .bin-label {
+      font-size: 0.7rem;
+      color: #8b949e;
+    }
+
+    .size-bin .bin-count {
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+
+    .size-bin.s .bin-count {
+      color: #58a6ff;
+    }
+
+    .size-bin.m .bin-count {
+      color: #fbbf24;
+    }
+
+    .size-bin.l .bin-count {
+      color: #f0883e;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="layout">
+    <!-- Header -->
+    <div class="header">
+      <h1>Smart Box Sorting</h1>
+      <span class="sub">แขนกล Hornet565 — แยกขนาดวัตถุ</span>
+      <div class="links">
+        <a href="index.html">Workshop</a>
+        <a href="floodboy.html">FloodBoy</a>
+        <a href="https://github.com/Soul-Brews-Studio/two-rivers-oracle">GitHub</a>
+      </div>
+    </div>
+
+    <!-- LEFT: Controls -->
+    <div class="panel" id="controls-panel">
+      <h2>Sorting Config</h2>
+      <div class="status-row">
+        <div class="dot wait" id="dot-mqtt"></div><span id="status-mqtt">mqtt: connecting...</span>
+      </div>
+
+      <label class="ctrl">Arm ID</label>
+      <input type="text" id="arm-id" value="HORNET-001" maxlength="20">
+
+      <label class="ctrl">Speed <span class="val" id="v-speed">4 items/min</span></label>
+      <input type="range" id="r-speed" min="1" max="12" step="1" value="4">
+
+      <label class="ctrl">Small Threshold <span class="val" id="v-small">8 cm</span></label>
+      <input type="range" id="r-small" min="3" max="15" step="0.5" value="8">
+
+      <label class="ctrl">Large Threshold <span class="val" id="v-large">20 cm</span></label>
+      <input type="range" id="r-large" min="10" max="40" step="0.5" value="20">
+
+      <label class="ctrl">Measurement Noise <span class="val" id="v-noise">5%</span></label>
+      <input type="range" id="r-noise" min="0" max="25" step="1" value="5">
+
+      <label class="ctrl">Publish Interval <span class="val" id="v-interval">2500 ms</span></label>
+      <input type="range" id="r-interval" min="500" max="10000" step="100" value="2500">
+
+      <h3>Modes</h3>
+      <div class="preset-grid" id="preset-grid">
+        <button class="preset-btn active" data-preset="normal">Normal<br><small>ปกติ</small></button>
+        <button class="preset-btn" data-preset="mixed">Mixed Sizes<br><small>ขนาดผสม</small></button>
+        <button class="preset-btn" data-preset="irregular">Irregular<br><small>รูปทรงแปลก</small></button>
+        <button class="preset-btn" data-preset="fast">High Speed<br><small>ความเร็วสูง</small></button>
+      </div>
+
+      <button class="start-btn off" id="btn-start" onclick="togglePublish()">Start Sorting</button>
+    </div>
+
+    <!-- CENTER: Visualization -->
+    <div class="panel">
+      <h2>Conveyor + Robot Arm</h2>
+      <div class="viz-wrap">
+        <div id="viz-container"></div>
+      </div>
+
+      <h2>Sorting Bins</h2>
+      <div class="size-bins">
+        <div class="size-bin s">
+          <div class="bin-count" id="bin-s">0</div>
+          <div class="bin-label">Small (&lt;<span id="thresh-s">8</span>cm)</div>
+        </div>
+        <div class="size-bin m">
+          <div class="bin-count" id="bin-m">0</div>
+          <div class="bin-label">Medium</div>
+        </div>
+        <div class="size-bin l">
+          <div class="bin-count" id="bin-l">0</div>
+          <div class="bin-label">Large (&gt;<span id="thresh-l">20</span>cm)</div>
+        </div>
+      </div>
+
+      <h2 style="margin-top:8px;">Size Distribution</h2>
+      <div class="chart-wrap"><canvas id="chart"></canvas></div>
+
+      <h3>Live Feed</h3>
+      <div class="feed" id="feed"></div>
+    </div>
+
+    <!-- RIGHT: Stats -->
+    <div class="panel">
+      <h2>Sorting Statistics</h2>
+      <div class="stat-grid">
+        <div class="stat-card blue">
+          <div class="num" id="s-total">0</div>
+          <div class="lbl">Total Sorted</div>
+        </div>
+        <div class="stat-card green">
+          <div class="num" id="s-accuracy">100%</div>
+          <div class="lbl">Accuracy</div>
+        </div>
+        <div class="stat-card blue">
+          <div class="num" id="s-small">0</div>
+          <div class="lbl">Small</div>
+        </div>
+        <div class="stat-card yellow">
+          <div class="num" id="s-medium">0</div>
+          <div class="lbl">Medium</div>
+        </div>
+        <div class="stat-card orange">
+          <div class="num" id="s-large">0</div>
+          <div class="lbl">Large</div>
+        </div>
+        <div class="stat-card red">
+          <div class="num" id="s-miss">0</div>
+          <div class="lbl">Misclassified</div>
+        </div>
+      </div>
+
+      <h3>Performance</h3>
+      <div style="font-size:0.7rem;color:#8b949e;margin-bottom:8px;">
+        <div>Speed: <span style="color:#58a6ff" id="info-speed">4 items/min</span></div>
+        <div>Throughput: <span style="color:#3fb950" id="info-throughput">0 items</span></div>
+        <div>Avg accuracy: <span style="color:#fbbf24" id="info-avg-acc">—</span></div>
+        <div>Measurement noise: <span style="color:#8b949e" id="info-noise">5%</span></div>
+      </div>
+
+      <h3>Size Log</h3>
+      <div class="feed" id="size-feed" style="max-height:250px;"></div>
+    </div>
+  </div>
+
+  <script>
+    // ===== CONSTANTS =====
+    const MQTT_BROKER = 'wss://dustboy-wss-bridge.laris.workers.dev/mqtt';
+    const MAX_CHART_POINTS = 60;
+    const MAX_FEED = 30;
+
+    // ===== STATE =====
+    let mqttClient = null;
+    let publishing = false;
+    let pubTimer = null;
+    let mode = 'normal';
+    let objCounter = 0;
+    let stats = { total: 0, small: 0, medium: 0, large: 0, misclassified: 0 };
+    let accuracySum = 0;
+
+    // Animation state
+    let objects = [];
+    let armAngle = -0.8;
+    let armPhase = 'idle';
+    let armTarget = null;
+    let heldObj = null;
+    let targetBinY = 0;
+    let animTimer = 0;
+    let cameraFlash = 0;
+
+    // ===== SLIDER BINDINGS =====
+    const sliders = [
+      ['r-speed', 'v-speed', v => v + ' items/min', 0],
+      ['r-small', 'v-small', v => v + ' cm', 1],
+      ['r-large', 'v-large', v => v + ' cm', 1],
+      ['r-noise', 'v-noise', v => v + '%', 0],
+      ['r-interval', 'v-interval', v => v + ' ms', 0],
+    ];
+    for (const [rid, vid, fmt, dec] of sliders) {
+      const r = document.getElementById(rid);
+      const v = document.getElementById(vid);
+      r.addEventListener('input', () => {
+        v.textContent = fmt(parseFloat(r.value).toFixed(dec));
+        if (rid === 'r-small') document.getElementById('thresh-s').textContent = r.value;
+        if (rid === 'r-large') document.getElementById('thresh-l').textContent = r.value;
+      });
+    }
+
+    // ===== PRESET BUTTONS =====
+    document.getElementById('preset-grid').addEventListener('click', e => {
+      const btn = e.target.closest('.preset-btn');
+      if (!btn) return;
+      document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const preset = btn.dataset.preset;
+
+      switch (preset) {
+        case 'normal':
+          mode = 'normal';
+          document.getElementById('r-speed').value = 4;
+          document.getElementById('v-speed').textContent = '4 items/min';
+          document.getElementById('r-noise').value = 5;
+          document.getElementById('v-noise').textContent = '5%';
+          break;
+        case 'mixed':
+          mode = 'mixed';
+          document.getElementById('r-noise').value = 8;
+          document.getElementById('v-noise').textContent = '8%';
+          break;
+        case 'irregular':
+          mode = 'irregular';
+          document.getElementById('r-noise').value = 18;
+          document.getElementById('v-noise').textContent = '18%';
+          break;
+        case 'fast':
+          mode = 'fast';
+          document.getElementById('r-speed').value = 12;
+          document.getElementById('v-speed').textContent = '12 items/min';
+          document.getElementById('r-noise').value = 10;
+          document.getElementById('v-noise').textContent = '10%';
+          break;
+      }
+    });
+
+    // ===== CHART SETUP =====
+    const ctx = document.getElementById('chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'Small', data: [], backgroundColor: 'rgba(88,166,255,0.6)', borderColor: '#58a6ff', borderWidth: 1 },
+          { label: 'Medium', data: [], backgroundColor: 'rgba(251,191,36,0.6)', borderColor: '#fbbf24', borderWidth: 1 },
+          { label: 'Large', data: [], backgroundColor: 'rgba(240,136,62,0.6)', borderColor: '#f0883e', borderWidth: 1 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: { duration: 200 },
+        scales: {
+          x: { display: false, stacked: true },
+          y: { stacked: true, grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 10 } } },
+        },
+        plugins: {
+          legend: { labels: { color: '#8b949e', font: { size: 10 }, boxWidth: 12 } },
+        },
+      },
+    });
+
+    // ===== GENERATE OBJECT =====
+    function generateObject() {
+      const smallThresh = parseFloat(document.getElementById('r-small').value);
+      const largeThresh = parseFloat(document.getElementById('r-large').value);
+
+      let actualSize;
+      if (mode === 'mixed') {
+        // Uniform distribution
+        actualSize = 3 + Math.random() * 35;
+      } else {
+        // Cluster around S/M/L centers
+        const cluster = Math.random();
+        if (cluster < 0.33) {
+          actualSize = smallThresh * 0.5 + Math.random() * smallThresh * 0.8;
+        } else if (cluster < 0.66) {
+          actualSize = smallThresh + Math.random() * (largeThresh - smallThresh);
+        } else {
+          actualSize = largeThresh + Math.random() * largeThresh * 0.5;
+        }
+      }
+
+      actualSize = Math.max(2, Math.min(40, actualSize));
+
+      // Measure with noise
+      const noise = parseFloat(document.getElementById('r-noise').value) / 100;
+      const measured = actualSize * (1 + (Math.random() - 0.5) * 2 * noise);
+
+      // Classify based on measured
+      let measuredBin;
+      if (measured < smallThresh) measuredBin = 'S';
+      else if (measured < largeThresh) measuredBin = 'M';
+      else measuredBin = 'L';
+
+      // True classification
+      let actualBin;
+      if (actualSize < smallThresh) actualBin = 'S';
+      else if (actualSize < largeThresh) actualBin = 'M';
+      else actualBin = 'L';
+
+      const accuracy = 1 - Math.abs(measured - actualSize) / actualSize;
+
+      // Colors by size
+      const colors = {
+        S: { r: 88, g: 166, b: 255 },
+        M: { r: 251, g: 191, b: 36 },
+        L: { r: 240, g: 136, b: 62 },
+      };
+
+      return {
+        actualSize: +actualSize.toFixed(1),
+        measuredSize: +Math.max(0.5, measured).toFixed(1),
+        measuredBin,
+        actualBin,
+        correct: measuredBin === actualBin,
+        accuracy: +Math.max(0, Math.min(1, accuracy) * 100).toFixed(1),
+        color: colors[actualBin],
+        irregular: mode === 'irregular',
+      };
+    }
+
+    // ===== P5.JS CONVEYOR + ARM =====
+    const vizSketch = new p5(function (p) {
+      const W = 500, H = 420;
+      const conveyorY = 200;
+      const armBaseX = 250, armBaseY = conveyorY - 15;
+      const seg1 = 70, seg2 = 55;
+
+      // Bin positions
+      const bins = [
+        { label: 'S', x: 140, y: 310, color: [88, 166, 255] },
+        { label: 'M', x: 250, y: 310, color: [251, 191, 36] },
+        { label: 'L', x: 360, y: 310, color: [240, 136, 62] },
+      ];
+
+      let effX = 250, effY = 120;
+      let sortAnim = null;
+
+      p.setup = function () {
+        p.createCanvas(W, H);
+        p.frameRate(30);
+      };
+
+      p.draw = function () {
+        p.clear();
+        p.background(13, 17, 23);
+        const time = p.millis() / 1000;
+        animTimer += 1 / 30;
+
+        // ── Floor ──
+        p.noStroke();
+        p.fill(30, 35, 42);
+        p.rect(0, conveyorY + 25, W, H - conveyorY - 25);
+
+        // ── Conveyor belt ──
+        p.fill(55, 65, 81);
+        p.rect(0, conveyorY, W, 25, 4);
+        p.stroke(75, 85, 99);
+        p.strokeWeight(1);
+        const beltOff = (time * 30) % 15;
+        for (let x = -15 + beltOff; x < W + 15; x += 15) {
+          p.line(x, conveyorY + 4, x, conveyorY + 21);
+        }
+        p.noStroke();
+
+        // Rollers
+        p.fill(75, 85, 99);
+        p.circle(20, conveyorY + 12, 16);
+        p.circle(W - 20, conveyorY + 12, 16);
+
+        // ── Move objects ──
+        for (let i = objects.length - 1; i >= 0; i--) {
+          const o = objects[i];
+          if (!o.held && !o.sorted) o.x += 0.4;
+          if (o.x > W + 20 && !o.held && !o.sorted) objects.splice(i, 1);
+          if (o.sorted && o.sortTimer > 0) {
+            o.sortTimer--;
+            if (o.sortTimer <= 0) objects.splice(i, 1);
+          }
+        }
+
+        // ── Spawn objects ──
+        const speed = parseFloat(document.getElementById('r-speed').value);
+        const spawnInt = 60 / speed;
+        if (publishing && animTimer > spawnInt) {
+          animTimer = 0;
+          const obj = generateObject();
+          objCounter++;
+          const scale = Math.max(0.4, Math.min(1.5, obj.actualSize / 15));
+          const w = 20 * scale + 5;
+          const h = 15 * scale + 5;
+          objects.push({
+            id: 'OBJ-' + String(objCounter).padStart(4, '0'),
+            x: -30, y: conveyorY - h,
+            w: w, h: h,
+            data: obj,
+            held: false,
+            sorted: false,
+            sortTimer: 0,
+            measured: false,
+          });
+        }
+
+        // ── Draw objects on conveyor ──
+        for (const o of objects) {
+          if (o.held || o.sorted) continue;
+          p.push();
+          const c = o.data.color;
+          if (o.data.irregular) {
+            p.fill(c.r, c.g, c.b, 180);
+            p.beginShape();
+            p.vertex(o.x, o.y + o.h);
+            p.vertex(o.x + o.w * 0.2, o.y);
+            p.vertex(o.x + o.w * 0.8, o.y + o.h * 0.1);
+            p.vertex(o.x + o.w, o.y + o.h * 0.7);
+            p.vertex(o.x + o.w * 0.9, o.y + o.h);
+            p.endShape(p.CLOSE);
+          } else {
+            p.fill(c.r, c.g, c.b, 180);
+            p.rect(o.x, o.y, o.w, o.h, 3);
+          }
+          p.pop();
+        }
+
+        // ── Camera / measurement zone ──
+        const camX = 160, camY = conveyorY - 70;
+        // Camera body
+        p.fill(55, 65, 81);
+        p.rect(camX - 15, camY, 30, 25, 4);
+        p.fill(17, 24, 39);
+        p.circle(camX, camY + 12, 14);
+        p.fill(88, 166, 255, 100);
+        p.circle(camX, camY + 12, 8);
+        // Camera label
+        p.fill(139, 148, 158);
+        p.textSize(8);
+        p.textAlign(p.CENTER);
+        p.text('CAMERA', camX, camY - 4);
+
+        // Measurement zone highlight
+        p.noFill();
+        p.stroke(88, 166, 255, 40 + Math.sin(time * 3) * 20);
+        p.strokeWeight(1);
+        p.drawingContext.setLineDash([3, 3]);
+        p.rect(camX - 30, conveyorY - 35, 60, 35 + 25);
+        p.drawingContext.setLineDash([]);
+        p.noStroke();
+
+        // Check objects in camera zone
+        for (const o of objects) {
+          if (o.held || o.sorted || o.measured) continue;
+          if (o.x > camX - 25 && o.x < camX + 5) {
+            o.measured = true;
+            cameraFlash = 8;
+            // Draw bounding box + measurement
+            p.stroke(88, 166, 255);
+            p.strokeWeight(2);
+            p.noFill();
+            p.rect(o.x - 3, o.y - 3, o.w + 6, o.h + 6);
+            // Dimension arrows
+            p.strokeWeight(1);
+            p.line(o.x, o.y - 8, o.x + o.w, o.y - 8);
+            p.line(o.x, o.y - 10, o.x, o.y - 6);
+            p.line(o.x + o.w, o.y - 10, o.x + o.w, o.y - 6);
+            p.noStroke();
+            p.fill(88, 166, 255);
+            p.textSize(9);
+            p.textAlign(p.CENTER);
+            p.text(o.data.measuredSize + 'cm', o.x + o.w / 2, o.y - 12);
+          }
+        }
+
+        // Camera flash
+        if (cameraFlash > 0) {
+          p.fill(88, 166, 255, cameraFlash * 8);
+          p.rect(camX - 30, conveyorY - 35, 60, 60);
+          cameraFlash--;
+        }
+
+        // ── Robot arm ──
+        // Find object to sort
+        if (armPhase === 'idle') {
+          for (const o of objects) {
+            if (!o.held && !o.sorted && o.measured && o.x > 200 && o.x < 240) {
+              armTarget = o;
+              armPhase = 'reaching';
+              break;
+            }
+          }
+        }
+
+        let tX = 250, tY = 120;
+        switch (armPhase) {
+          case 'reaching':
+            tX = armTarget ? armTarget.x + armTarget.w / 2 : 250;
+            tY = armTarget ? armTarget.y : 180;
+            effX += (tX - effX) * 0.15;
+            effY += (tY - effY) * 0.15;
+            if (Math.abs(effX - tX) < 2 && Math.abs(effY - tY) < 2 && armTarget) {
+              armTarget.held = true;
+              heldObj = armTarget;
+              armPhase = 'lifting';
+            }
+            break;
+          case 'lifting':
+            tX = heldObj ? heldObj.x + heldObj.w / 2 : 250;
+            tY = 120;
+            effX += (tX - effX) * 0.15;
+            effY += (tY - effY) * 0.15;
+            if (Math.abs(effY - tY) < 2) {
+              // Determine target bin
+              const bin = heldObj.data.measuredBin;
+              targetBinY = bin === 'S' ? 0 : bin === 'M' ? 1 : 2;
+              armPhase = 'sorting';
+            }
+            break;
+          case 'sorting':
+            const tBin = bins[targetBinY];
+            tX = tBin.x;
+            tY = tBin.y - 10;
+            effX += (tX - effX) * 0.1;
+            effY += (tY - effY) * 0.1;
+            if (Math.abs(effX - tX) < 5 && Math.abs(effY - tY) < 5) {
+              if (heldObj) {
+                heldObj.held = false;
+                heldObj.sorted = true;
+                heldObj.sortTimer = 30;
+                heldObj.x = tBin.x;
+                heldObj.y = tBin.y;
+                heldObj = null;
+              }
+              armPhase = 'returning';
+            }
+            break;
+          case 'returning':
+            tX = 250;
+            tY = 120;
+            effX += (tX - effX) * 0.1;
+            effY += (tY - effY) * 0.1;
+            if (Math.abs(effX - tX) < 2 && Math.abs(effY - tY) < 2) {
+              armPhase = 'idle';
+              armTarget = null;
+            }
+            break;
+          default:
+            tX = 250;
+            tY = 120;
+            effX += (tX - effX) * 0.05;
+            effY += (tY - effY) * 0.05;
+        }
+
+        const j3x = effX;
+        const j3y = effY;
+
+        const deltaBaseX = armBaseX;
+        const deltaBaseY = 40;
+
+        // Draw ceiling mount / base of Hornet 565
+        p.push();
+        p.fill(50, 55, 60);
+        p.rect(deltaBaseX - 30, 0, 60, deltaBaseY, 4); // mount to ceiling
+
+        // Main robot body (white, rounded)
+        p.fill(235, 240, 245);
+        p.stroke(75, 85, 99);
+        p.strokeWeight(1);
+        p.rect(deltaBaseX - 65, deltaBaseY - 10, 130, 45, 12);
+
+        // Details on body
+        p.fill(30, 40, 50);
+        p.noStroke();
+        p.circle(deltaBaseX - 35, deltaBaseY + 12, 22); // Big motor circle
+        p.fill(200, 30, 30); // adept logo/light
+        p.rect(deltaBaseX + 6, deltaBaseY + 8, 12, 5, 2);
+        p.fill(130, 140, 150);
+        p.textSize(12);
+        p.textStyle(p.BOLD);
+        p.textAlign(p.LEFT, p.CENTER);
+        p.text('adept', deltaBaseX + 22, deltaBaseY + 11);
+        p.textStyle(p.NORMAL);
+        p.pop();
+
+        // Draw 3 arms
+        const numArms = 3;
+        for (let i = 0; i < numArms; i++) {
+          let bX, bY;
+          // Position motors on the body
+          if (i === 0) { bX = deltaBaseX - 45; bY = deltaBaseY + 15; }
+          else if (i === 1) { bX = deltaBaseX + 45; bY = deltaBaseY + 15; }
+          else { bX = deltaBaseX + 5; bY = deltaBaseY + 28; }
+
+          let eX, eY;
+          // Position attaches on effector
+          if (i === 0) { eX = j3x - 14; eY = j3y - 20; }
+          else if (i === 1) { eX = j3x + 14; eY = j3y - 20; }
+          else { eX = j3x; eY = j3y - 12; }
+
+          const dx = eX - bX;
+          const dy = eY - bY;
+
+          // Bend elbow outwards
+          let mx = bX + dx * 0.35;
+          let my = bY + dy * 0.35;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0) {
+            const nx = -dy / dist;
+            const ny = dx / dist;
+            const dir = (i === 0) ? -1 : (i === 1) ? 1 : 0.6;
+            const bow = 25;
+
+            const elbowX = mx + nx * bow * dir;
+            const elbowY = my + ny * bow * dir;
+
+            // Upper Arm (Thick white/silver)
+            p.stroke(210, 215, 220);
+            p.strokeWeight(10);
+            p.line(bX, bY, elbowX, elbowY);
+
+            // Upper arm joint at motor
+            p.noStroke();
+            p.fill(130, 140, 150);
+            p.circle(bX, bY, 18);
+
+            // Elbow joint
+            p.fill(80, 90, 100);
+            p.circle(elbowX, elbowY, 12);
+
+            // Lower Arm (Parallel carbon fiber rods)
+            const ldx = eX - elbowX;
+            const ldy = eY - elbowY;
+            const ldist = Math.sqrt(ldx * ldx + ldy * ldy);
+            if (ldist > 0) {
+              const lnx = -ldy / ldist * 5;
+              const lny = ldx / ldist * 5;
+
+              p.stroke(40, 45, 50);
+              p.strokeWeight(2.5);
+              p.line(elbowX + lnx, elbowY + lny, eX + lnx, eY + lny);
+              p.line(elbowX - lnx, elbowY - lny, eX - lnx, eY - lny);
+            }
+            p.noStroke();
+          }
+        }
+
+        // Draw Effector Plate & Gripper
+        p.push();
+        p.fill(210, 215, 220);
+        p.stroke(100, 110, 120);
+        p.strokeWeight(2);
+        p.ellipse(j3x, j3y - 18, 36, 14);
+
+        // Center shaft
+        p.fill(60, 65, 70);
+        p.noStroke();
+        p.rect(j3x - 4, j3y - 18, 8, 18, 2);
+
+        // Suction cup base
+        p.fill(120, 130, 140);
+        p.rect(j3x - 10, j3y, 20, 5, 2);
+
+        // Suction tip
+        p.fill(heldObj ? 88 : 70, heldObj ? 166 : 80, heldObj ? 255 : 90);
+        p.circle(j3x, j3y + 6, 10);
+        p.pop();
+
+        // Held object
+        if (heldObj) {
+          const c = heldObj.data.color;
+          p.fill(c.r, c.g, c.b, 200);
+          p.rect(j3x - heldObj.w * 0.4, j3y + 8, heldObj.w * 0.8, heldObj.h * 0.8, 2);
+        }
+
+        // ── Sorting bins ──
+        for (const bin of bins) {
+          p.fill(bin.color[0], bin.color[1], bin.color[2], 30);
+          p.stroke(bin.color[0], bin.color[1], bin.color[2], 80);
+          p.strokeWeight(1);
+          p.rect(bin.x - 30, bin.y - 25, 80, 50, 6);
+          p.noStroke();
+          p.fill(bin.color[0], bin.color[1], bin.color[2]);
+          p.textAlign(p.CENTER, p.CENTER);
+          p.textSize(16);
+          p.textStyle(p.BOLD);
+          p.text(bin.label, bin.x + 10, bin.y);
+          p.textStyle(p.NORMAL);
+        }
+
+        // Draw sorted objects briefly in bins
+        for (const o of objects) {
+          if (!o.sorted) continue;
+          const c = o.data.color;
+          p.fill(c.r, c.g, c.b, Math.min(200, o.sortTimer * 7));
+          p.rect(o.x - 5, o.y - 5, o.w * 0.6, o.h * 0.6, 2);
+        }
+
+        // ── Arm label ──
+        p.fill(139, 148, 158);
+        p.textAlign(p.CENTER, p.TOP);
+        p.textSize(9);
+        p.text('Hornet565', armBaseX, armBaseY + 38);
+      };
+    }, document.getElementById('viz-container'));
+
+    // ===== PUBLISH =====
+    function publishReading() {
+      const armId = document.getElementById('arm-id').value || 'HORNET-001';
+      const ts = Date.now();
+      const now = new Date(ts);
+      const timeStr = now.toLocaleTimeString('th-TH', { hour12: false });
+
+      const obj = generateObject();
+      objCounter++;
+      const objId = 'OBJ-' + String(objCounter).padStart(4, '0');
+
+      stats.total++;
+      if (obj.measuredBin === 'S') stats.small++;
+      else if (obj.measuredBin === 'M') stats.medium++;
+      else stats.large++;
+
+      if (!obj.correct) stats.misclassified++;
+      accuracySum += obj.accuracy;
+
+      const payload = {
+        object_id: objId,
+        measured_size: obj.measuredSize,
+        actual_size: obj.actualSize,
+        bin: obj.measuredBin,
+        actual_bin: obj.actualBin,
+        accuracy: obj.accuracy,
+        timestamp: ts,
+      };
+
+      if (mqttClient?.connected) {
+        mqttClient.publish('sorting/' + armId + '/action', JSON.stringify(payload));
+      }
+
+      // Update chart
+      chart.data.labels.push(timeStr);
+      chart.data.datasets[0].data.push(obj.measuredBin === 'S' ? 1 : 0);
+      chart.data.datasets[1].data.push(obj.measuredBin === 'M' ? 1 : 0);
+      chart.data.datasets[2].data.push(obj.measuredBin === 'L' ? 1 : 0);
+      if (chart.data.labels.length > MAX_CHART_POINTS) {
+        chart.data.labels.shift();
+        chart.data.datasets.forEach(d => d.data.shift());
+      }
+      chart.update('none');
+
+      // Feed
+      const cls = !obj.correct ? 'miss' : obj.measuredBin === 'S' ? 'small' : obj.measuredBin === 'M' ? 'medium' : 'large';
+      addFeedEntry(timeStr, objId, obj, cls);
+      addSizeEntry(timeStr, objId, obj);
+      updateStats();
+    }
+
+    // ===== FEED =====
+    function addFeedEntry(time, objId, obj, cls) {
+      const feed = document.getElementById('feed');
+      const el = document.createElement('div');
+      el.className = 'feed-entry ' + cls;
+      const correctStr = obj.correct ? '' : ' MISS';
+      el.innerHTML = '<span class="ts">' + time + '</span><span class="val-col">' + obj.measuredBin + correctStr + '</span><span class="info">' + obj.measuredSize + 'cm (actual ' + obj.actualSize + 'cm) ' + obj.accuracy + '%</span>';
+      feed.prepend(el);
+      while (feed.children.length > MAX_FEED) feed.lastChild.remove();
+    }
+
+    function addSizeEntry(time, objId, obj) {
+      const feed = document.getElementById('size-feed');
+      const el = document.createElement('div');
+      const cls = obj.correct ? 'pass' : 'fail';
+      const color = obj.correct ? '#3fb950' : '#f87171';
+      el.className = 'feed-entry';
+      el.innerHTML = '<span class="ts">' + time + '</span><span style="color:' + color + '">' + (obj.correct ? 'OK' : 'MISS') + '</span> <span class="info">' + objId + ' measured=' + obj.measuredSize + 'cm actual=' + obj.actualSize + 'cm bin=' + obj.measuredBin + '</span>';
+      feed.prepend(el);
+      while (feed.children.length > MAX_FEED) feed.lastChild.remove();
+    }
+
+    function updateStats() {
+      document.getElementById('s-total').textContent = stats.total;
+      const acc = stats.total > 0 ? (((stats.total - stats.misclassified) / stats.total) * 100).toFixed(1) : 100;
+      document.getElementById('s-accuracy').textContent = acc + '%';
+      document.getElementById('s-small').textContent = stats.small;
+      document.getElementById('s-medium').textContent = stats.medium;
+      document.getElementById('s-large').textContent = stats.large;
+      document.getElementById('s-miss').textContent = stats.misclassified;
+
+      document.getElementById('bin-s').textContent = stats.small;
+      document.getElementById('bin-m').textContent = stats.medium;
+      document.getElementById('bin-l').textContent = stats.large;
+
+      document.getElementById('info-speed').textContent = document.getElementById('r-speed').value + ' items/min';
+      document.getElementById('info-throughput').textContent = stats.total + ' items';
+      const avgAcc = stats.total > 0 ? (accuracySum / stats.total).toFixed(1) : '—';
+      document.getElementById('info-avg-acc').textContent = avgAcc + '%';
+      document.getElementById('info-noise').textContent = document.getElementById('r-noise').value + '%';
+    }
+
+    // ===== MQTT =====
+    function initMQTT() {
+      mqttClient = mqtt.connect(MQTT_BROKER);
+      mqttClient.on('connect', () => {
+        document.getElementById('dot-mqtt').className = 'dot on';
+        document.getElementById('status-mqtt').textContent = 'mqtt: connected';
+      });
+      mqttClient.on('offline', () => {
+        document.getElementById('dot-mqtt').className = 'dot off';
+        document.getElementById('status-mqtt').textContent = 'mqtt: offline';
+      });
+    }
+
+    // ===== START / STOP =====
+    window.togglePublish = function () {
+      const btn = document.getElementById('btn-start');
+      if (publishing) {
+        publishing = false;
+        clearInterval(pubTimer);
+        btn.textContent = 'Start Sorting';
+        btn.className = 'start-btn off';
+      } else {
+        publishing = true;
+        const interval = parseInt(document.getElementById('r-interval').value);
+        pubTimer = setInterval(publishReading, interval);
+        btn.textContent = 'Stop Sorting';
+        btn.className = 'start-btn on';
+        stats = { total: 0, small: 0, medium: 0, large: 0, misclassified: 0 };
+        accuracySum = 0;
+        objCounter = 0;
+        objects = [];
+        updateStats();
+      }
+    };
+
+    // ===== URL PARAMS =====
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('id')) document.getElementById('arm-id').value = params.get('id');
+    if (params.get('auto')) setTimeout(() => togglePublish(), 500);
+
+    // ===== INIT =====
+    initMQTT();
+  </script>
+</body>
+
+</html>
